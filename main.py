@@ -1,18 +1,16 @@
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 import yt_dlp
-import os
-import uuid
-import tempfile
 
-app = FastAPI(title="Seal-Style yt-dlp API", version="1.0")
+app = FastAPI(title="Seal-Style Direct URL yt-dlp API")
 
 
-# ---------- LIST FORMATS ----------
+# -------------------- LIST ALL FORMATS (DIRECT URL) --------------------
 @app.get("/formats")
 def list_formats(url: str = Query(...)):
     try:
-        ydl_opts = {"dump_single_json": True, "quiet": True, "no_warnings": True}
+        ydl_opts = {"quiet": True, "no_warnings": True}
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -24,16 +22,17 @@ def list_formats(url: str = Query(...)):
                 "resolution": f"{f.get('width')}x{f.get('height')}",
                 "fps": f.get("fps"),
                 "filesize": f.get("filesize"),
+                "format_note": f.get("format_note"),
                 "vcodec": f.get("vcodec"),
                 "acodec": f.get("acodec"),
-                "note": f.get("format_note"),
+                "direct_url": f.get("url")  # <-- DIRECT DOWNLOAD URL
             })
 
         return {
             "title": info.get("title"),
             "uploader": info.get("uploader"),
             "duration": info.get("duration"),
-            "available_formats": formats
+            "formats": formats
         }
 
     except Exception as e:
@@ -41,64 +40,60 @@ def list_formats(url: str = Query(...)):
 
 
 
-# ---------- DOWNLOAD VIDEO ----------
-@app.get("/download/video")
-def download_video(url: str, quality: str = Query("best")):
-
-    temp_dir = tempfile.gettempdir()
-    filename = f"{uuid.uuid4()}.mp4"
-    filepath = os.path.join(temp_dir, filename)
-
-    ydl_opts = {
-        "format": quality,  # best, 1080p, 720p etc
-        "outtmpl": filepath,
-        "quiet": True,
-        "no_warnings": True
-    }
-
+# -------------------- GET BEST VIDEO DIRECT URL --------------------
+@app.get("/video")
+def get_video(url: str, quality: str = Query("best")):
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        ydl_opts = {"quiet": True, "no_warnings": True}
 
-        return FileResponse(filepath, filename=os.path.basename(filepath))
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        selected = None
+        for f in info["formats"]:
+            if quality == "best" or quality in (f.get("format_id"), f.get("format_note", "")):
+                selected = f
+
+        if not selected:
+            selected = info["formats"][-1]
+
+        return {
+            "title": info["title"],
+            "quality": selected.get("format_note"),
+            "ext": selected.get("ext"),
+            "direct_url": selected.get("url")
+        }
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)})
 
 
 
-# ---------- DOWNLOAD AUDIO ----------
-@app.get("/download/audio")
-def download_audio(url: str, audio_format: str = Query("mp3")):
-
-    temp_dir = tempfile.gettempdir()
-    filename = f"{uuid.uuid4()}.{audio_format}"
-    filepath = os.path.join(temp_dir, filename)
-
-    ydl_opts = {
-        "format": "bestaudio",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": audio_format,
-            "preferredquality": "320"
-        }],
-        "outtmpl": filepath,
-        "quiet": True,
-        "no_warnings": True
-    }
-
+# -------------------- GET BEST AUDIO DIRECT URL --------------------
+@app.get("/audio")
+def get_audio(url: str):
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        ydl_opts = {"quiet": True, "no_warnings": True}
 
-        return FileResponse(filepath, filename=os.path.basename(filepath))
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        audio_formats = [f for f in info["formats"] if f.get("vcodec") == "none"]
+
+        best = audio_formats[-1] if audio_formats else None
+
+        return {
+            "title": info["title"],
+            "audio_quality": best.get("abr"),
+            "ext": best.get("ext"),
+            "direct_url": best.get("url")
+        }
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)})
 
 
 
-# ---------- ROOT ----------
 @app.get("/")
 def root():
-    return {"message": "Seal-Style yt-dlp API running successfully!"}
+    return {"message": "Direct URL yt-dlp API running!"}
