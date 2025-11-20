@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+yt-dlp
+mutagen
+aria2
+python-multipart
